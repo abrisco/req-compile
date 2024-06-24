@@ -50,7 +50,7 @@ pycparser==2.22 \
     # https://files.pythonhosted.org/packages/13/a3/a812df4e2dd5696d1f351d58b8fe16a405b234ad2886a0dab9183fb78109/pycparser-2.22-py3-none-any.whl#sha256=c3702b6d3dd8c7abc1afa565d7e63d53a1d0bd86cdc24edd75470f4de499cfcc
 pyspnego==0.11.0 \
     --hash=sha256:cdfe9af7b19749d692e02fd4bd1b4b71d44ecb8dd9b2474abb0f3d90f6154e7e
-    # via requests-kerberos
+    # via requests-kerberos ([kerberos])
     # https://files.pythonhosted.org/packages/02/91/9ef6d9425e888f3e7e67301ab9ffd4aad027f667384405f9c3fa30027de3/pyspnego-0.11.0-py3-none-any.whl#sha256=cdfe9af7b19749d692e02fd4bd1b4b71d44ecb8dd9b2474abb0f3d90f6154e7e
 requests==2.32.3 \
     --hash=sha256:70761cfe03c773ceb22aa2f671b4757976145175cdfca038c02654d061d6dcc6

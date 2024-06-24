@@ -59,10 +59,8 @@ def _deserialize_custom_compile_command(value: str) -> str:
     return json.loads(value)
 
 
-def parse_args(args: Optional[Sequence[str]]) -> argparse.Namespace:
-    """Parse command line arguments"""
-    parser = argparse.ArgumentParser()
-
+def add_internal_args(parser: argparse.ArgumentParser) -> None:
+    """Add arguments to a parser that should only be provided by the Bazel tooling"""
     parser.add_argument(
         "--requirements_file",
         dest="requirements_files",
@@ -88,11 +86,6 @@ def parse_args(args: Optional[Sequence[str]]) -> argparse.Namespace:
         help="A terminal command which represents how the output solution can be reproduced.",
     )
     parser.add_argument(
-        "--upgrade",
-        action="store_true",
-        help="If set, any existing solution will be ignored during compilation.",
-    )
-    parser.add_argument(
         "--allow_sdists",
         action="store_true",
         help="If set, the compiled solution will be allowed to include source distributions (sdists) for packages.",
@@ -104,6 +97,19 @@ def parse_args(args: Optional[Sequence[str]]) -> argparse.Namespace:
             "If set, all indexes will be ignored. This will require "
             "the solution file to already satisfy all requirements."
         ),
+    )
+
+def add_user_args(parser: argparse.ArgumentParser) -> None:
+    """Add arguments users are directed to pass."""
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Refresh a solution without affecting constraints.",
+    )
+    parser.add_argument(
+        "--upgrade",
+        action="store_true",
+        help="If set, any existing solution will be ignored during compilation.",
     )
     parser.add_argument(
         "--wheel-dir",
@@ -118,7 +124,19 @@ def parse_args(args: Optional[Sequence[str]]) -> argparse.Namespace:
         help="Enable verbose logging.",
     )
 
-    return parser.parse_args(args)
+
+def parse_args(args: Optional[Sequence[str]]) -> argparse.Namespace:
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser()
+
+    add_internal_args(parser)
+    add_user_args(parser)
+
+    args = parser.parse_args(args)
+    if args.upgrade and args.refresh:
+        parser.error("`--upgrade`, and `--refresh` are mutually exclusive. Please pass one per invocation.")
+
+    return args
 
 
 def parse_index_urls(content: str) -> Tuple[Set[str], Set[str], Set[str]]:
@@ -169,6 +187,7 @@ def compile_requirements(
     requirements_ins: Mapping[str, Path],
     solution: Path,
     upgrade: bool = False,
+    refresh: bool = False,
     constraints: Optional[Mapping[str, Path]] = None,
     no_index: bool = False,
     only_binary: bool = False,
@@ -250,6 +269,7 @@ def compile_requirements(
             repo=repo,
             constraint_reqs=constraint_reqs,
             only_binary=AllOnlyBinarySet() if only_binary else set(),
+            remove_constraints=refresh,
         )
     except NoCandidateException as exc:
         raise CompilationError(repo=repo, parent=exc) from exc
