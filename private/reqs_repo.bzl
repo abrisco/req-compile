@@ -505,6 +505,25 @@ def _generate_interface_bzl_content(defs, repository_name):
         requirements_wheels = "\n        ".join(requirements_wheels),
     )
 
+def _get_intersect(data):
+    """Get the intersecting values from a collection of lists.
+
+    Args:
+        data (list of lists): Data to iterate over
+
+    Returns:
+        list: A list of values that intersect in `data`.
+    """
+    if not data:
+        return []
+
+    intersection = data[0]
+
+    for l in data[1:]:
+        intersection = [x for x in intersection if x in l]
+
+    return intersection
+
 def _py_requirements_repository_impl(repository_ctx):
     if repository_ctx.attr.requirements_lock and repository_ctx.attr.requirements_locks:
         fail("`requirements_lock` and `requirements_locks` are mutually exclusive for `py_requirements_repository`. Please update {}".format(
@@ -541,13 +560,15 @@ def _py_requirements_repository_impl(repository_ctx):
                 requirements_lock = lock,
                 constraint = constraint,
             )
-            all_packages.extend(packages.keys())
+            all_packages.append(packages.keys())
 
             _write_defs_file(repository_ctx, packages, defs_file, defs_id)
 
+        intersect_packages = _get_intersect(all_packages)
+
         repository_ctx.file("defs.bzl", _generate_interface_bzl_content(defs, repository_ctx.name))
         repository_ctx.file("BUILD.bazel", _BUILD_FILE_TEMPLATE.format(
-            packages = json.encode_indent(sorted(depset(all_packages).to_list()), indent = " " * 4),
+            packages = json.encode_indent(sorted(depset(intersect_packages).to_list()), indent = " " * 4),
         ))
         _requirements_repository_common(repository_ctx)
     else:
