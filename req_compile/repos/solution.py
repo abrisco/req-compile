@@ -1,7 +1,8 @@
+import collections
 import os
 import sys
 from pathlib import Path
-from typing import Any, Iterable, Optional, Sequence, Tuple, Union
+from typing import Any, DefaultDict, Iterable, Optional, Sequence, Set, Tuple, Union
 
 import packaging.requirements
 from overrides import overrides
@@ -15,6 +16,7 @@ from req_compile.errors import NoCandidateException
 from req_compile.repos import RepositoryInitializationError
 from req_compile.repos.repository import Candidate, DistributionType, Repository
 from req_compile.repos.source import ReferenceSourceRepository
+from req_compile.utils import NormName, normalize_project_name
 
 
 def _candidate_from_node(node: DependencyNode) -> Candidate:
@@ -47,6 +49,13 @@ class SolutionRepository(Repository):
         # hashes
         self._partial_line = ""
 
+        # The extras each project was solved with, gathered from the annotations
+        # in the solution. A solution only describes the requirements of the
+        # extras that were active when it was compiled.
+        self._known_extras: DefaultDict[NormName, Set[NormName]] = (
+            collections.defaultdict(set)
+        )
+
         if os.path.exists(filename) or self.filename == "-":
             self.load_from_file(self.filename)
         else:
@@ -77,10 +86,25 @@ class SolutionRepository(Repository):
 
         try:
             node = self.solution[req.name]
-            candidate = _candidate_from_node(node)
-            return [candidate]
         except KeyError:
             return []
+
+        # The solution only describes the extras it was compiled with. If more are
+        # being asked for now, this repository cannot say what they require, so it
+        # must defer to a repository holding the complete metadata.
+        if (
+            req.extras
+            and node.metadata is not None
+            and not node.metadata.describes_extras(req.extras)
+        ):
+            self.logger.debug(
+                "%s is in the solution but it does not describe the extras %s",
+                req.name,
+                ",".join(sorted(req.extras)),
+            )
+            return []
+
+        return [_candidate_from_node(node)]
 
     @overrides
     def resolve_candidate(
@@ -122,6 +146,18 @@ class SolutionRepository(Repository):
             self._parse_line(line, meta_file)
         if self._partial_line:
             self._parse_multi_line("", meta_file)
+
+        self._apply_known_extras()
+
+    def _apply_known_extras(self) -> None:
+        """Mark each solved distribution with the extras this solution describes.
+
+        This runs once the whole solution has been read, because a project can be
+        referenced with an extra before the line that pins it is parsed.
+        """
+        for node in self.solution:
+            if node.metadata is not None:
+                node.metadata.known_extras = self._known_extras[node.key]
 
     def _remove_nodes(self) -> None:
         nodes_to_remove = []
@@ -255,6 +291,12 @@ class SolutionRepository(Repository):
         )
         version = req_compile.utils.parse_version(next(iter(req.specifier)).version)
 
+        # Record this project even when no extras are involved, so that a solution
+        # that describes no extras for it is distinguishable from one that was
+        # never asked about it at all.
+        known_extras = self._known_extras[normalize_project_name(req.name)]
+        known_extras.update(normalize_project_name(extra) for extra in req.extras)
+
         metadata = None
         if req.name in self.solution:
             metadata = self.solution[req.name].metadata
@@ -295,6 +337,13 @@ class SolutionRepository(Repository):
                 except ValueError:
                     proj_name = name
 
+                if constraint_req is not None:
+                    # `name` can be written as `project[extra]`, which tells us
+                    # the solution knows what that extra of `project` requires.
+                    self._known_extras[normalize_project_name(proj_name)].update(
+                        normalize_project_name(extra) for extra in constraint_req.extras
+                    )
+
                 self.solution.add_dist(proj_name, None, constraint_req)
                 reverse_dep = self.solution[name]
                 if reverse_dep.metadata is None:
@@ -309,6 +358,11 @@ class SolutionRepository(Repository):
                 reverse_dep = None
 
             reason = _create_metadata_req(req, metadata, name, constraint)
+            # The reason carries the extras of this project that its reverse
+            # dependency asked for, e.g. `pyspnego==0.9.2  # foo (>=0.9.2 [kerberos])`.
+            known_extras.update(
+                normalize_project_name(extra) for extra in reason.extras
+            )
             if reverse_dep is not None:
                 assert reverse_dep.metadata is not None
                 reverse_dep.metadata.reqs.append(reason)

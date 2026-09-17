@@ -176,6 +176,94 @@ def test_round_trip(
             assert node.key in solution_result.solution
 
 
+@pytest.mark.parametrize(
+    "first_roots, second_roots",
+    [
+        # An extra is added to a project that was previously solved without one.
+        (["a"], ["a[x1]"]),
+        # An extra is added alongside the one already in the solution.
+        (["a[x1]"], ["a[x1,x2]"]),
+        # The requested extra is swapped for a different one.
+        (["a[x1]"], ["a[x2]"]),
+        # A root asks for an extra of a project the solution only has transitively.
+        (["d"], ["d", "a[x2]"]),
+        # `a` gets solved from the solution via `d` (which asks for a[x1]) before
+        # `e` is reached and asks for a[x1,x2]. The new extra is therefore only
+        # discovered after `a` has already been given its metadata.
+        (["d"], ["d", "e"]),
+    ],
+)
+def test_recompile_with_new_extras(
+    mock_metadata, mock_pypi, tmp_path, first_roots, second_roots
+):
+    """Recompiling against a solution must not drop the deps of newly requested extras.
+
+    A solution only describes the extras that were active when it was compiled. When
+    it is reused as a repository and more extras are asked for, it has to defer to a
+    repository that holds the complete metadata.
+    """
+    mock_pypi.load_scenario("normal")
+
+    def compile_to_str(roots, repo):
+        results, nodes = req_compile.compile.perform_compile(
+            [DistInfo("test", None, list(parse_requirements(roots)), meta=True)],
+            repo,
+        )
+        buffer = StringIO()
+        write_requirements_file(results, nodes, repo=repo, write_to=buffer)
+        return buffer.getvalue()
+
+    solution_path = tmp_path / "solution.txt"
+    solution_path.write_text(compile_to_str(first_roots, mock_pypi), encoding="utf-8")
+
+    # Recompile using the existing solution the way `py_reqs_compiler` does.
+    incremental = compile_to_str(
+        second_roots, MultiRepository(SolutionRepository(solution_path), mock_pypi)
+    )
+
+    assert incremental == compile_to_str(second_roots, mock_pypi)
+
+
+def test_solution_does_not_supply_unknown_extras():
+    """A solution can only offer a candidate for the extras it recorded."""
+    solution_repo = SolutionRepository("garbage.txt.test")
+    solution_repo._load_from_lines(
+        ["myreq==34  # requirements.in ([known])\n", "child_req==1  # myreq[known]\n"]
+    )
+
+    assert solution_repo.get_candidates(parse_requirement("myreq"))
+    assert solution_repo.get_candidates(parse_requirement("myreq[known]"))
+    assert solution_repo.get_candidates(parse_requirement("myreq[unknown]")) == []
+    assert solution_repo.get_candidates(parse_requirement("myreq[known,unknown]")) == []
+
+
+def test_solution_knows_extras_that_add_no_requirements():
+    """An extra is recorded even when it contributed nothing to the solution.
+
+    Extras like `requests[security]` are empty, or only add requirements that are
+    excluded by markers on this platform. They leave no dependency behind in the
+    solution, so the annotation on the project's own line is the only record of
+    them. Without it these would be re-resolved needlessly, and would fail
+    outright when no index is available.
+    """
+    solution_repo = SolutionRepository("garbage.txt.test")
+    solution_repo._load_from_lines(["myreq==34  # requirements.in ([empty])\n"])
+
+    assert solution_repo.get_candidates(parse_requirement("myreq[empty]"))
+    assert solution_repo.get_candidates(parse_requirement("myreq[other]")) == []
+
+
+def test_solution_knows_extras_referenced_before_being_pinned():
+    """Extras can be referenced by another project before the pin that defines them."""
+    solution_repo = SolutionRepository("garbage.txt.test")
+    solution_repo._load_from_lines(
+        ["child_req==1  # myreq[late]\n", "myreq==34  # requirements.in\n"]
+    )
+
+    assert solution_repo.get_candidates(parse_requirement("myreq[late]"))
+    assert solution_repo.get_candidates(parse_requirement("myreq[other]")) == []
+
+
 def test_writing_repo_sources(mock_metadata, mock_pypi, tmp_path):
     mock_pypi.load_scenario("normal")
 
