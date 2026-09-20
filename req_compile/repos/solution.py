@@ -122,6 +122,10 @@ class SolutionRepository(Repository):
 
     def load_from_file(self, filename: str) -> None:
         self.solution = req_compile.dists.DistributionCollection()
+        # The extras are gathered while parsing and only describe the solution
+        # being loaded now, so nothing from a previously loaded file may survive.
+        self._partial_line = ""
+        self._known_extras.clear()
 
         if filename == "-":
             reqfile = sys.stdin
@@ -157,7 +161,9 @@ class SolutionRepository(Repository):
         """
         for node in self.solution:
             if node.metadata is not None:
-                node.metadata.known_extras = self._known_extras[node.key]
+                # Copy, so that the metadata keeps describing this solution even if
+                # another one is loaded into this repository later.
+                node.metadata.known_extras = set(self._known_extras[node.key])
 
     def _remove_nodes(self) -> None:
         nodes_to_remove = []
@@ -377,8 +383,16 @@ def _create_metadata_req(
 ) -> packaging.requirements.Requirement:
     marker = ""
     if "[" in name:
-        extra = next(iter(req_compile.utils.parse_requirement(name).extras))
-        marker = ' ; extra == "{}"'.format(extra)
+        # The reverse dependency can be annotated with more than one of its extras,
+        # e.g. `child==1  # parent[x1,x2]`, meaning any of them pulls in this
+        # requirement. All of them have to be reconstructed, otherwise a later
+        # compilation asking for one of the omitted extras would drop this
+        # requirement even though the solution does describe it.
+        source_extras = sorted(req_compile.utils.parse_requirement(name).extras)
+        if source_extras:
+            marker = " ; " + " or ".join(
+                'extra == "{}"'.format(extra) for extra in source_extras
+            )
 
     # req will only have extras if the solution file had them in the left-hand
     # side of == expression, e.g. req[extra]==1.0.  Since pip doesn't support having
