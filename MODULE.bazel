@@ -74,6 +74,20 @@ dev_requirements.parse(
 )
 use_repo(dev_requirements, "pyspark_3_5_1_dd6569e5", "req_compile_test_sdist")
 
+# A source only distribution built by Bazel through a `build_file` annotation.
+dev_requirements.parse(
+    name = "req_compile_test_sdist_build",
+    requirements_lock = "//private/tests/sdist_build:requirements.txt",
+)
+use_repo(dev_requirements, "req_compile_test_sdist_build")
+
+dev_requirements.package_annotation(
+    build_file = "//private/tests/sdist_build:BUILD.sdist_build_example.bazel",
+    entry_points = {
+        "sdist-build-example": "sdist_build_example.cli:main",
+    },
+    package = "sdist-build-example",
+)
 dev_requirements.parse(
     name = "req_compile_test_simple",
     requirements_lock = "//private/tests/simple:requirements.txt",

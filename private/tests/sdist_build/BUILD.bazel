@@ -1,0 +1,41 @@
+load("@req_compile_test_sdist_build//:defs.bzl", "entry_point", "requirement")
+load("@rules_python//python:defs.bzl", "py_test")
+load("//:defs.bzl", "py_reqs_compiler", "py_reqs_solution_test")
+
+exports_files(["BUILD.sdist_build_example.bazel"])
+
+filegroup(
+    name = "requirements",
+    srcs = ["requirements.in"],
+    data = glob(["wheeldir/*.tar.gz"]),
+)
+
+py_reqs_compiler(
+    name = "requirements.update",
+    allow_sdists = True,
+    requirements_in = ":requirements",
+    requirements_txt = "requirements.txt",
+)
+
+py_reqs_solution_test(
+    name = "requirements_test",
+    compiler = ":requirements.update",
+)
+
+alias(
+    name = "sdist_build_example_bin",
+    actual = entry_point("sdist-build-example"),
+)
+
+# The package comes from a source distribution built by Bazel through the
+# `build_file` annotation, no interpreter is involved in fetching it.
+py_test(
+    name = "sdist_build",
+    srcs = ["sdist_build.py"],
+    data = [":sdist_build_example_bin"],
+    env = {"EXAMPLE_BIN": "$(rlocationpath :sdist_build_example_bin)"},
+    deps = [
+        "@rules_python//python/runfiles",
+        requirement("sdist-build-example"),
+    ],
+)

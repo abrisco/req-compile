@@ -201,6 +201,17 @@ Source distributions have their metadata extracted by running them on the machin
 compilation, which may not match the target. Prefer ``--only-binary :all:`` when compiling for another
 platform. ``req-candidates`` accepts the same options to show the candidates available for a target.
 
+Building source distributions with Bazel
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Wheels are the recommended way to consume packages in Bazel, but some packages only publish source
+distributions. Rather than building them with an interpreter when the repository is fetched, which is
+neither hermetic nor cross-platform, a package can be given a ``BUILD`` file through the ``build_file``
+annotation. The source distribution is then only extracted and the ``BUILD`` file builds it with Bazel.
+The ``py_site_packages`` rule lays the sources out as an installed package, complete with the
+``.dist-info`` metadata ``importlib.metadata`` expects, and anything else the package needs, such as
+native extensions, can be built with ordinary Bazel targets. See the ``package_annotation`` tag and
+``py_site_packages`` in the `Bazel rules documentation <docs/docs.md>`_.
+
 Identifying source of constraints
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Why did I just get version 1.11.0 of ``six``? Find out by examining the output::

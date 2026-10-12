@@ -156,6 +156,28 @@ filegroup(
 )
 """
 
+# Facts about the distribution for `BUILD` files provided through the
+# `build_file` annotation.
+_PACKAGE_BZL_TEMPLATE = """\
+\"\"\"Facts about the `{package}` distribution in this repository.\"\"\"
+
+# The name of the distribution.
+PACKAGE = {package_json}
+
+# The version of the distribution.
+VERSION = {version_json}
+
+# The downloaded distribution, a wheel or a source archive.
+ARCHIVE = {archive_json}
+
+# The directory a source distribution was extracted to, or None for a wheel,
+# whose contents are extracted to `site-packages`.
+SOURCE_DIR = {source_dir_json}
+
+# Console scripts declared by the `entry_points` annotation, script name to `module:attribute`.
+ENTRY_POINTS = {entry_points_json}
+"""
+
 # Each hub using the wheel gets a package holding the `py_library` with the
 # dependencies that hub resolved for it.
 _HUB_BUILD_TEMPLATE = """\
@@ -239,6 +261,43 @@ def _generate_entry_point_rule(*, name, script, pkg):
         src = script.replace("\\", "/"),
         pkg = pkg,
     )
+
+def _extract_wheel(repository_ctx, whl_name):
+    """Extract a wheel into `site-packages`."""
+
+    # Unfortunately `repository_ctx.extract` does not allow us to dictate
+    # the type of the archive. So in order to get Bazel to extract a wheel
+    # the archive must be renamed to `.zip`.
+    repository_ctx.symlink(
+        whl_name,
+        whl_name + ".zip",
+    )
+    repository_ctx.extract(
+        whl_name + ".zip",
+        output = "site-packages",
+    )
+    repository_ctx.delete(whl_name + ".zip")
+
+def _extract_sdist(repository_ctx, archive):
+    """Extract a source distribution into the repository.
+
+    Returns:
+        str: The directory the sources were extracted to.
+    """
+    root = repository_ctx.path(".")
+    before = [entry.basename for entry in root.readdir()]
+    repository_ctx.extract(archive)
+    created = [
+        entry.basename
+        for entry in root.readdir()
+        if entry.basename not in before and entry.is_dir
+    ]
+    if len(created) != 1:
+        fail("Expected the source distribution `{}` to contain a single directory, found: {}".format(
+            archive,
+            created,
+        ))
+    return created[0]
 
 def _parse_entry_points_txt(content):
     console_scripts = {}
@@ -356,24 +415,20 @@ def _whl_repository_impl(repository_ctx):
         )
         whl_sha256 = whl_result.sha256
 
-        if not whl_name.endswith(".whl"):
-            sdist_info = _build_sdist(repository_ctx, whl_name)
-            whl_name = sdist_info.wheel
-
-    # Unfortunately `repository_ctx.extract` does not allow us to dictate
-    # the type of the archive. So in order to get Bazel to extract a wheel
-    # the archive must be renamed to `.zip`.
-    repository_ctx.symlink(
-        whl_name,
-        whl_name + ".zip",
-    )
-    repository_ctx.extract(
-        whl_name + ".zip",
-        output = "site-packages",
-    )
-    repository_ctx.delete(whl_name + ".zip")
-
     annotations = deserialize_package_annotation(repository_ctx.attr.annotations)
+    archive_name = whl_name
+
+    source_dir = None
+    if whl_name.endswith(".whl"):
+        _extract_wheel(repository_ctx, whl_name)
+    elif annotations.build_file:
+        # The `BUILD` file of the annotation builds the source distribution, so
+        # only its sources are extracted.
+        source_dir = _extract_sdist(repository_ctx, whl_name)
+    else:
+        sdist_info = _build_sdist(repository_ctx, whl_name)
+        whl_name = sdist_info.wheel
+        _extract_wheel(repository_ctx, whl_name)
 
     patches = repository_ctx.attr.patches + [
         repository_ctx.path(Label(patch))
@@ -411,16 +466,17 @@ def _whl_repository_impl(repository_ctx):
     dist_info_dir = None
     platlib_dir = None
     site_packages = repository_ctx.path("./site-packages")
-    for entry in site_packages.readdir():
-        if entry.basename.endswith(".dist-info"):
-            dist_info_dir = entry
-        if entry.basename.endswith("-{}.data".format(repository_ctx.attr.version)):
-            for sub_entry in entry.readdir():
-                if sub_entry.basename == "platlib":
-                    platlib_dir = sub_entry
-                    break
+    if site_packages.exists:
+        for entry in site_packages.readdir():
+            if entry.basename.endswith(".dist-info"):
+                dist_info_dir = entry
+            if entry.basename.endswith("-{}.data".format(repository_ctx.attr.version)):
+                for sub_entry in entry.readdir():
+                    if sub_entry.basename == "platlib":
+                        platlib_dir = sub_entry
+                        break
 
-    if not dist_info_dir:
+    if not dist_info_dir and not source_dir:
         fail("Failed to find dist-info directory.")
 
     # https://peps.python.org/pep-0427/#what-s-the-deal-with-purelib-vs-platlib
@@ -438,10 +494,31 @@ def _whl_repository_impl(repository_ctx):
 
     # Check for an entry_points.txt
     entry_points = {}
-    entry_points_path = dist_info_dir.get_child("entry_points.txt")
-    if entry_points_path.exists:
-        entry_points_content = repository_ctx.read(entry_points_path)
-        entry_points = _parse_entry_points_txt(entry_points_content)
+    if dist_info_dir:
+        entry_points_path = dist_info_dir.get_child("entry_points.txt")
+        if entry_points_path.exists:
+            entry_points_content = repository_ctx.read(entry_points_path)
+            entry_points = _parse_entry_points_txt(entry_points_content)
+
+    # Scripts declared by the annotation add to or override those of the wheel.
+    for script, target in annotations.entry_points.items():
+        module, _, attribute = target.partition(":")
+        if not module or not attribute:
+            fail("The entry point `{}` of `{}` must be written as `module:attribute`, got `{}`".format(
+                script,
+                repository_ctx.attr.package,
+                target,
+            ))
+        entry_points[script] = struct(module = module, attribute = attribute)
+
+    repository_ctx.file("package.bzl", _PACKAGE_BZL_TEMPLATE.format(
+        package = repository_ctx.attr.package,
+        package_json = json.encode(repository_ctx.attr.package),
+        version_json = json.encode(repository_ctx.attr.version),
+        archive_json = json.encode(archive_name),
+        source_dir_json = json.encode(source_dir) if source_dir else "None",
+        entry_points_json = json.encode_indent(annotations.entry_points, indent = " " * 4),
+    ))
 
     entry_point_scripts = []
     for entry_point, entry_point_data in entry_points.items():
@@ -473,15 +550,23 @@ def _whl_repository_impl(repository_ctx):
         additive_build_path = repository_ctx.path(Label(annotations.additive_build_file))
         additive_content += repository_ctx.read(additive_build_path)
 
-    root_content = [_ROOT_BUILD_TEMPLATE.format(
-        entry_point_scripts = json.encode(sorted(entry_point_scripts)),
-        srcs = srcs,
-        srcs_exclude = repr(srcs_exclude),
-        data = repr(data),
-        data_exclude = repr(data_exclude),
-        deps_labels = json.encode_indent(label_deps, indent = " " * 4),
-        whl_name = whl_name,
-    )] + root_content
+    if annotations.build_file:
+        # The annotation provides the whole BUILD file. The entry point scripts
+        # are still exported so the hub packages can define their binaries.
+        root_content = [
+            repository_ctx.read(repository_ctx.path(annotations.build_file)),
+            "\nexports_files({})\n".format(json.encode(sorted(entry_point_scripts))),
+        ]
+    else:
+        root_content = [_ROOT_BUILD_TEMPLATE.format(
+            entry_point_scripts = json.encode(sorted(entry_point_scripts)),
+            srcs = srcs,
+            srcs_exclude = repr(srcs_exclude),
+            data = repr(data),
+            data_exclude = repr(data_exclude),
+            deps_labels = json.encode_indent(label_deps, indent = " " * 4),
+            whl_name = whl_name,
+        )] + root_content
 
     repository_ctx.file("BUILD.bazel", "\n".join(root_content) + additive_content)
 

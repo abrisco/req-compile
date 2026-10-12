@@ -25,6 +25,10 @@ def deserialize_package_annotation(content):
     if data.get("additive_build_file", None):
         additive_build_file = Label(data["additive_build_file"])
 
+    build_file = None
+    if data.get("build_file", None):
+        build_file = Label(data["build_file"])
+
     additive_content = ""
     if data.get("additive_build_file_content", None):
         additive_content += data["additive_build_file_content"]
@@ -34,6 +38,7 @@ def deserialize_package_annotation(content):
     return struct(
         additive_build_file_content = additive_content or None,
         additive_build_file = additive_build_file,
+        build_file = build_file,
         copy_srcs = data.get("copy_srcs", {}),
         copy_files = data.get("copy_files", {}),
         copy_executables = data.get("copy_executables", {}),
@@ -42,5 +47,6 @@ def deserialize_package_annotation(content):
         srcs_exclude_glob = data.get("srcs_exclude_glob", []),
         deps = data.get("deps", []),
         deps_excludes = data.get("deps_excludes", []),
+        entry_points = data.get("entry_points", {}),
         patches = data.get("patches", []),
     )

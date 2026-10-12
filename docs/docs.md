@@ -8,6 +8,7 @@
 - [py_reqs_compiler](#py_reqs_compiler)
 - [py_reqs_solution_test](#py_reqs_solution_test)
 - [py_requirements_repository](#py_requirements_repository)
+- [py_site_packages](#py_site_packages)
 - [sdist_repository](#sdist_repository)
 - [whl_repository](#whl_repository)
 
@@ -216,8 +217,8 @@ py_reqs_solution_test(
 load("@rules_req_compile//:defs.bzl", "py_package_annotation")
 
 py_package_annotation(*, <a href="#py_package_annotation-additive_build_file">additive_build_file</a>, <a href="#py_package_annotation-additive_build_file_content">additive_build_file_content</a>, <a href="#py_package_annotation-additive_build_content">additive_build_content</a>,
-                      <a href="#py_package_annotation-copy_srcs">copy_srcs</a>, <a href="#py_package_annotation-copy_files">copy_files</a>, <a href="#py_package_annotation-copy_executables">copy_executables</a>, <a href="#py_package_annotation-data">data</a>, <a href="#py_package_annotation-data_exclude_glob">data_exclude_glob</a>,
-                      <a href="#py_package_annotation-srcs_exclude_glob">srcs_exclude_glob</a>, <a href="#py_package_annotation-deps">deps</a>, <a href="#py_package_annotation-deps_excludes">deps_excludes</a>, <a href="#py_package_annotation-patches">patches</a>)
+                      <a href="#py_package_annotation-build_file">build_file</a>, <a href="#py_package_annotation-copy_srcs">copy_srcs</a>, <a href="#py_package_annotation-copy_files">copy_files</a>, <a href="#py_package_annotation-copy_executables">copy_executables</a>, <a href="#py_package_annotation-data">data</a>, <a href="#py_package_annotation-data_exclude_glob">data_exclude_glob</a>,
+                      <a href="#py_package_annotation-srcs_exclude_glob">srcs_exclude_glob</a>, <a href="#py_package_annotation-deps">deps</a>, <a href="#py_package_annotation-deps_excludes">deps_excludes</a>, <a href="#py_package_annotation-entry_points">entry_points</a>, <a href="#py_package_annotation-patches">patches</a>)
 </pre>
 
 Annotations to apply to the BUILD file content from package generated from a `pip_repository` rule.
@@ -233,6 +234,7 @@ Annotations to apply to the BUILD file content from package generated from a `pi
 | <a id="py_package_annotation-additive_build_file"></a>additive_build_file |  The label of a `BUILD` file to add to the generated one for a pacakge.   |  `None` |
 | <a id="py_package_annotation-additive_build_file_content"></a>additive_build_file_content |  Raw text to add to the generated `BUILD` file of a package.   |  `None` |
 | <a id="py_package_annotation-additive_build_content"></a>additive_build_content |  __DEPRECATED__ use `additive_build_file_content` instead.   |  `None` |
+| <a id="py_package_annotation-build_file"></a>build_file |  A `BUILD` file replacing the generated one. It must define `library`, a `py_library` of the installed package, and `whl`, a `filegroup` of the distribution. When set, source distributions are extracted instead of built, so the `BUILD` file is responsible for building them, typically with `py_site_packages`. A `package.bzl` file with `PACKAGE`, `VERSION`, `ARCHIVE`, `SOURCE_DIR` and `ENTRY_POINTS` is generated next to it for the `BUILD` file to load.   |  `None` |
 | <a id="py_package_annotation-copy_srcs"></a>copy_srcs |  A mapping of `src` and `out` files for [@bazel_skylib//rules:copy_file.bzl][cf]. The output files are added to the `py_library.srcs` attribute.   |  `{}` |
 | <a id="py_package_annotation-copy_files"></a>copy_files |  A mapping of `src` and `out` files for [@bazel_skylib//rules:copy_file.bzl][cf]. The output files are added to the `py_library.data` attribute.   |  `{}` |
 | <a id="py_package_annotation-copy_executables"></a>copy_executables |  A mapping of `src` and `out` files for [@bazel_skylib//rules:copy_file.bzl][cf]. Targets generated here will also be flagged as executable.   |  `{}` |
@@ -241,11 +243,69 @@ Annotations to apply to the BUILD file content from package generated from a `pi
 | <a id="py_package_annotation-srcs_exclude_glob"></a>srcs_exclude_glob |  A list of labels to add as `srcs` to the generated `py_library` target.   |  `[]` |
 | <a id="py_package_annotation-deps"></a>deps |  A list of dependencies to include to the package. Can be other packages or labels.   |  `[]` |
 | <a id="py_package_annotation-deps_excludes"></a>deps_excludes |  A list of packages to exclude from the package. (In cases where a package has circular dependencies).   |  `[]` |
+| <a id="py_package_annotation-entry_points"></a>entry_points |  Console scripts of the package as a mapping of script name to `module:attribute`. Required with `build_file` for `entry_point()` to work, as the scripts are otherwise read from the built wheel.   |  `{}` |
 | <a id="py_package_annotation-patches"></a>patches |  A list of patch files to apply to the wheel.   |  `[]` |
 
 **RETURNS**
 
 str: A json encoded string of the provided content.
+
+
+<a id="py_site_packages"></a>
+
+## py_site_packages
+
+<pre>
+load("@rules_req_compile//:defs.bzl", "py_site_packages")
+
+py_site_packages(<a href="#py_site_packages-name">name</a>, <a href="#py_site_packages-distribution">distribution</a>, <a href="#py_site_packages-version">version</a>, <a href="#py_site_packages-srcs">srcs</a>, <a href="#py_site_packages-data">data</a>, <a href="#py_site_packages-strip_prefix">strip_prefix</a>, <a href="#py_site_packages-metadata">metadata</a>, <a href="#py_site_packages-entry_points">entry_points</a>,
+                 <a href="#py_site_packages-deps">deps</a>, <a href="#py_site_packages-kwargs">**kwargs</a>)
+</pre>
+
+Install Python sources as a package in a `site-packages` directory.
+
+This lays out `srcs` and `data` under `site-packages` as `pip` would install them, writes the
+`.dist-info` directory holding the metadata of the distribution so `importlib.metadata` can find
+it, and defines a `py_library` importing from that directory. It is meant for `BUILD` files given
+to the `build_file` annotation of a package, which replace building a source distribution with an
+interpreter by a Bazel build of its sources.
+
+```python
+load("@rules_req_compile//:defs.bzl", "py_site_packages")
+load(":package.bzl", "ARCHIVE", "ENTRY_POINTS", "PACKAGE", "SOURCE_DIR", "VERSION")
+
+py_site_packages(
+    name = "library",
+    srcs = glob([SOURCE_DIR + "/src/**/*.py"]),
+    data = glob([SOURCE_DIR + "/src/**/*.txt"]),
+    distribution = PACKAGE,
+    entry_points = ENTRY_POINTS,
+    metadata = SOURCE_DIR + "/PKG-INFO",
+    strip_prefix = SOURCE_DIR + "/src",
+    version = VERSION,
+)
+```
+
+No `RECORD` file is written, so tools that list installed files, such as `pip`, do not see
+the package. Anything a `setup.py` would generate has to be produced by other targets and
+passed in `srcs` or `data`.
+
+
+**PARAMETERS**
+
+
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="py_site_packages-name"></a>name |  The name of the `py_library`.   |  none |
+| <a id="py_site_packages-distribution"></a>distribution |  The name of the distribution.   |  none |
+| <a id="py_site_packages-version"></a>version |  The version of the distribution.   |  none |
+| <a id="py_site_packages-srcs"></a>srcs |  The Python sources to install, in the same package as this target.   |  `[]` |
+| <a id="py_site_packages-data"></a>data |  Files to install alongside the sources.   |  `[]` |
+| <a id="py_site_packages-strip_prefix"></a>strip_prefix |  A directory prefix to remove from the paths of `srcs` and `data`, e.g. the `src` directory of a source distribution.   |  `""` |
+| <a id="py_site_packages-metadata"></a>metadata |  The core metadata of the distribution, e.g. the `PKG-INFO` of a source distribution. A minimal `METADATA` is written when omitted.   |  `None` |
+| <a id="py_site_packages-entry_points"></a>entry_points |  Console scripts as a mapping of script name to `module:attribute`.   |  `{}` |
+| <a id="py_site_packages-deps"></a>deps |  Dependencies of the `py_library`. Hubs add the dependencies they resolved themselves, so this is only needed for dependencies outside the hub.   |  `[]` |
+| <a id="py_site_packages-kwargs"></a>kwargs |  Additional keyword arguments for the `py_library`.   |  none |
 
 
 <a id="py_requirements_repository"></a>

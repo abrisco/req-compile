@@ -31,6 +31,7 @@ bzl_library(
     deps = [
         "//private:annotation",
         "//private:reqs_repo",
+        "//private:site_packages",
         "//private:whl_repo",
     ],
 )

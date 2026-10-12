@@ -6,6 +6,7 @@
 - [py_reqs_compiler](#py_reqs_compiler)
 - [py_reqs_solution_test](#py_reqs_solution_test)
 - [py_requirements_repository](#py_requirements_repository)
+- [py_site_packages](#py_site_packages)
 - [sdist_repository](#sdist_repository)
 - [whl_repository](#whl_repository)
 
@@ -29,6 +30,10 @@ load(
     _py_requirements_repository = "py_requirements_repository",
 )
 load(
+    "//private:site_packages.bzl",
+    _py_site_packages = "py_site_packages",
+)
+load(
     "//private:whl_repo.bzl",
     _whl_repository = "whl_repository",
 )
@@ -39,4 +44,5 @@ py_package_annotation_target = _py_package_annotation_target
 py_reqs_compiler = _py_reqs_compiler
 py_reqs_solution_test = _py_reqs_solution_test
 py_requirements_repository = _py_requirements_repository
+py_site_packages = _py_site_packages
 whl_repository = _whl_repository

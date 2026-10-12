@@ -144,6 +144,7 @@ def _collect_annotations(ctx):
             data = package_annotation(
                 additive_build_file = annotation.additive_build_file,
                 additive_build_file_content = annotation.additive_build_file_content,
+                build_file = annotation.build_file,
                 copy_srcs = annotation.copy_srcs,
                 copy_files = annotation.copy_files,
                 copy_executables = annotation.copy_executables,
@@ -152,6 +153,7 @@ def _collect_annotations(ctx):
                 srcs_exclude_glob = annotation.srcs_exclude_glob,
                 deps = annotation.deps,
                 deps_excludes = annotation.deps_excludes,
+                entry_points = annotation.entry_points,
                 patches = annotation.patches,
             )
             if annotation.package in annotations and annotations[annotation.package] != data:
@@ -240,13 +242,63 @@ def _requirements_impl(ctx):
     )
 
 _annotation = tag_class(
-    doc = "A tag representing a annotation editing a Python package.",
+    doc = """\
+A tag representing an annotation editing a Python package.
+
+Annotations apply to the package in every hub of every module and are collected from
+every module using the extension, so a module can ship fixes for packages its users get
+by depending on it. The root module wins any disagreement.
+
+A `build_file` replaces the generated `BUILD` file of the package entirely, which is how
+source distributions are built with Bazel instead of with an interpreter at fetch time:
+
+```python
+requirements.package_annotation(
+    package = "example",
+    build_file = "//third_party/example:BUILD.example.bazel",
+    entry_points = {"example": "example.cli:main"},
+)
+```
+
+```python
+# BUILD.example.bazel
+load("@rules_req_compile//:defs.bzl", "py_site_packages")
+load(":package.bzl", "ARCHIVE", "ENTRY_POINTS", "PACKAGE", "SOURCE_DIR", "VERSION")
+
+package(default_visibility = ["//visibility:public"])
+
+py_site_packages(
+    name = "library",
+    srcs = glob([SOURCE_DIR + "/src/**/*.py"]),
+    distribution = PACKAGE,
+    entry_points = ENTRY_POINTS,
+    metadata = SOURCE_DIR + "/PKG-INFO",
+    strip_prefix = SOURCE_DIR + "/src",
+    version = VERSION,
+)
+
+filegroup(
+    name = "whl",
+    srcs = [ARCHIVE],
+)
+```
+""",
     attrs = {
         "additive_build_file": attr.label(
             doc = "The label of a `BUILD` file to add to the generated one for a pacakge.",
         ),
         "additive_build_file_content": attr.string(
             doc = "Raw text to add to the generated `BUILD` file of a package.",
+        ),
+        "build_file": attr.label(
+            doc = (
+                "A `BUILD` file replacing the generated one. It must define `library`, a `py_library` of the " +
+                "installed package, and `whl`, a `filegroup` of the distribution. Source distributions are " +
+                "extracted rather than built when set, so no interpreter is needed. A `package.bzl` file " +
+                "defining `PACKAGE`, `VERSION`, `ARCHIVE`, `SOURCE_DIR` and `ENTRY_POINTS` is generated for " +
+                "the `BUILD` file to load."
+            ),
+            allow_single_file = True,
         ),
         "copy_executables": attr.string_dict(
             doc = "A mapping of `src` and `out` files for [@bazel_skylib//rules:copy_file.bzl](https://github.com/bazelbuild/bazel-skylib/blob/1.7.1/docs/copy_file_doc.md). Targets generated here will also be flagged as executable.",
@@ -268,6 +320,13 @@ _annotation = tag_class(
         ),
         "deps_excludes": attr.string_list(
             doc = "A list of exclude glob patterns to add as `data` to the generated `py_library` target.",
+        ),
+        "entry_points": attr.string_dict(
+            doc = (
+                "Console scripts of the package as a mapping of script name to `module:attribute`. Scripts " +
+                "are normally read from the built wheel, so this is required with `build_file` for " +
+                "`entry_point()` to work, and otherwise adds to or overrides the scripts of the wheel."
+            ),
         ),
         "package": attr.string(
             doc = "The name of the package the annotations applies to.",

@@ -1,0 +1,22 @@
+# The `BUILD` file of the `sdist-build-example` package, provided through the
+# `build_file` annotation. It builds the source distribution with Bazel.
+load("@rules_req_compile//:defs.bzl", "py_site_packages")
+load(":package.bzl", "ARCHIVE", "ENTRY_POINTS", "PACKAGE", "SOURCE_DIR", "VERSION")
+
+package(default_visibility = ["//visibility:public"])
+
+py_site_packages(
+    name = "library",
+    srcs = glob([SOURCE_DIR + "/src/**/*.py"]),
+    data = glob([SOURCE_DIR + "/src/**/*.txt"]),
+    distribution = PACKAGE,
+    entry_points = ENTRY_POINTS,
+    metadata = SOURCE_DIR + "/PKG-INFO",
+    strip_prefix = SOURCE_DIR + "/src",
+    version = VERSION,
+)
+
+filegroup(
+    name = "whl",
+    srcs = [ARCHIVE],
+)

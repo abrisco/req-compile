@@ -9,6 +9,10 @@ New in version 1.2.0:
 * Every distinct wheel is downloaded once into a repository named ``{package}_{version}_{sha256[:8]}``
   and shared by all hubs of all modules pinning it. Each hub keeps its own dependency edges, so extras
   and version differences between hubs are preserved. Hub names must be unique across modules.
+* Source distributions can be built with Bazel instead of with an interpreter at fetch time. The new
+  ``build_file`` annotation replaces the generated ``BUILD`` file of a package, and the new
+  ``py_site_packages`` rule lays sources out as an installed package with ``.dist-info`` metadata. The
+  ``entry_points`` annotation declares console scripts for such packages.
 * Hubs whose locks do not all contain the same packages are supported. A package missing from a lock
   is incompatible with that lock's platform, so targets depending on it are skipped there.
 * Removed the ``defs_id_map`` attribute of the ``parse`` tag and the WORKSPACE-only ``repositories()``
